@@ -256,15 +256,9 @@ def assign_coords(
   xarray_jax.Dataset and xarray_jax.DataArray for more information.
 
   This function can be used to set jax_coords on an existing DataArray or
-  Dataset, and also to set a mix of jax and non-jax coordinates. It implements
-  some workarounds to prevent xarray trying and failing to create IndexVariables
-  from jax arrays under the hood.
-
-  If you have any jax_coords with the same name as a dimension, you'll need to
-  use this function instead of data_array.assign_coords or dataset.assign_coords
-  in general, to avoid an xarray bug where it tries (and in our case fails) to
-  create indexes for existing jax coords. See
-  https://github.com/pydata/xarray/issues/7885.
+  Dataset, and also to set a mix of jax and non-jax coordinates. It uses
+  xarray.Coordinates with empty indexes to prevent xarray trying and failing
+  to create IndexVariables from jax arrays under the hood.
 
   Args:
     x: An xarray Dataset or DataArray.
@@ -276,23 +270,13 @@ def assign_coords(
     The Dataset or DataArray with coordinates assigned, similarly to
     Dataset.assign_coords / DataArray.assign_coords.
   """
-  coords = {} if coords is None else dict(coords)  # Copy before mutating.
   jax_coords = {} if jax_coords is None else dict(jax_coords)
 
-  # Any existing JAX coords must be dropped and re-added via the workaround
-  # below, since otherwise .assign_coords will trigger an xarray bug where
-  # it tries to recreate the indexes again for the existing coordinates.
-  # Can remove if/when https://github.com/pydata/xarray/issues/7885 fixed.
-  existing_jax_coords = get_jax_coords(x)
-  jax_coords = existing_jax_coords | jax_coords
-  x = x.drop_vars(existing_jax_coords.keys())
+  # Assign static coordinates directly
+  if coords: x = x.assign_coords(coords)
 
-  # We need to ensure that xarray doesn't try to create an index for
-  # coordinates with the same name as a dimension, since this will fail if
-  # given a wrapped JAX tracer.
-  # It appears the only way to avoid this is to name them differently to any
-  # dimension name, then rename them back afterwards.
-  renamed_jax_coords = {}
+  # For each JAX coordinate, create a new xarray.Variable with empty indexes
+  processed_jax_coords = {}
   for name, coord in jax_coords.items():
     if isinstance(coord, xarray.DataArray):
       coord = coord.variable
@@ -324,16 +308,13 @@ def assign_coords(
     # determine which coords need to be treated as leaves of the flattened
     # structure vs static data.
     coord.attrs[_JAX_COORD_ATTR_NAME] = True
-    renamed_jax_coords[f'__NONINDEX_{name}'] = coord
+    processed_jax_coords[name] = coord
 
-  x = x.assign_coords(coords=coords | renamed_jax_coords)
+  # Use xarray.Coordinates with empty indexes to skip automatic index creation
+  jax_coords_obj = xarray.Coordinates(coords=processed_jax_coords, indexes={})
+  x = x.assign_coords(jax_coords_obj)
 
-  rename_back_mapping = {f'__NONINDEX_{name}': name for name in jax_coords}
-  if isinstance(x, xarray.Dataset):
-    # Using 'rename' doesn't work if renaming to the same name as a dimension.
-    return x.rename_vars(rename_back_mapping)
-  else:  # DataArray
-    return x.rename(rename_back_mapping)
+  return x
 
 
 def get_jax_coords(x: DatasetOrDataArray) -> Mapping[Hashable, Any]:
