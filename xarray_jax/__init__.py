@@ -270,11 +270,7 @@ def assign_coords(
     The Dataset or DataArray with coordinates assigned, similarly to
     Dataset.assign_coords / DataArray.assign_coords.
   """
-  coords = {} if coords is None else dict(coords)  # Copy before mutating.
   jax_coords = {} if jax_coords is None else dict(jax_coords)
-
-  existing_jax_coords = get_jax_coords(x)
-  jax_coords = existing_jax_coords | jax_coords
 
   # Assign static coordinates directly
   if coords: x = x.assign_coords(coords)
