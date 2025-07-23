@@ -303,15 +303,11 @@ def assign_jax_coords(
 
 
 def unwrap(value, require_jax=False):
-  """Unwraps ScalarLeafWrapper instances, passing through JAX arrays and other values."""
-  if isinstance(value, ScalarLeafWrapper):
-    return value.jax_leaf
-  elif isinstance(value, jax.Array):
-    return value
-  elif require_jax:
-    raise TypeError(f'Expected JAX array, found {type(value)}.')
-  else:
-    return value
+  """Unwraps NonArrayLeafWrapper instances, passing through other values."""
+  unwrapped = value.leaf if isinstance(value, NonArrayLeafWrapper) else value
+  if require_jax and not isinstance(unwrapped, jax.Array):
+    raise TypeError(f'Expected JAX array, found {type(unwrapped)}.')
+  return unwrapped
 
 
 def unwrap_data(
@@ -354,7 +350,7 @@ def jax_vars(
   """Like unwrap_vars, but will complain if vars are not all jax arrays."""
   return cast(Mapping[str, jax.Array], unwrap_vars(dataset, require_jax=True))
 
-class ScalarLeafWrapper:
+class NonArrayLeafWrapper:
   """Wraps non-array data into a duck-typed array suitable for use with xarray.
 
 
@@ -369,29 +365,22 @@ class ScalarLeafWrapper:
     self._shape = shape
     
     # Determine dtype.
-    if isinstance(leaf, bool):
+    if hasattr(leaf, 'dtype'):
+      self._dtype = leaf.dtype
+    elif isinstance(leaf, bool):
       self._dtype = jnp.bool_.dtype
     elif isinstance(leaf, (int, np.integer)):
       self._dtype = jnp.int32.dtype
     elif isinstance(leaf, (float, np.floating)):
       self._dtype = jnp.float32.dtype
-    elif leaf is None:
-      self._dtype = jnp.object_.dtype
     else:
-      # Attempt to infer dtype, falling back to object.
-      try:
-        self._dtype = jnp.result_type(leaf)
-      except (TypeError, ValueError):
-        self._dtype = jnp.object_.dtype
+      self._dtype = np.dtype(object)
   
   def __array_ufunc__(self, ufunc, method, *args, **kwargs):
-    if method != '__call__':
-      return NotImplemented
-    try:
-      # Get the corresponding jax.numpy function to the NumPy ufunc:
-      func = getattr(jnp, ufunc.__name__)
-    except AttributeError:
-      return NotImplemented
+    raise TypeError(
+        f"NumPy ufunc '{ufunc.__name__}' is not supported on symbolic JAX "
+        f"leaf of type {type(self._leaf).__name__}."
+    )
   def __array_function__(self, func, types, args, kwargs):
     raise TypeError(
         f"NumPy function '{func.__name__}' is not supported on symbolic JAX "
@@ -415,7 +404,7 @@ class ScalarLeafWrapper:
   def size(self):
     return np.prod(self._shape)
 
-  def __getitem__(self):
+  def __getitem__(self, key):
     raise TypeError(
         f"Indexing is not supported on symbolic JAX leaf of type "
         f"{type(self._leaf).__name__}."
@@ -423,41 +412,11 @@ class ScalarLeafWrapper:
 
 
   @property
-  def jax_leaf(self):
-    """Provides access to the original, unwrapped JAX leaf."""
+  def leaf(self):
+    """Provides access to the original, unwrapped leaf."""
     return self._leaf
 
-def apply_ufunc(func, *args, require_jax=False, **apply_ufunc_kwargs):
-  """Like xarray.apply_ufunc but for jax-specific ufuncs.
-
-  Many numpy ufuncs will work fine out of the box with xarray_jax and
-  JaxArrayWrapper, since JaxArrayWrapper quacks (mostly) like a numpy array and
-  will convert many numpy operations to jax ops under the hood. For these
-  situations, xarray.apply_ufunc should work fine.
-
-  But sometimes you need a jax-specific ufunc which needs to be given a
-  jax array as input or return a jax array as output. In that case you should
-  use this helper as it will remove any JaxArrayWrapper before calling the func,
-  and wrap the result afterwards before handing it back to xarray.
-
-  Args:
-    func: A function that works with jax arrays (e.g. using functions from
-      jax.numpy) but otherwise meets the spec for the func argument to
-      xarray.apply_ufunc.
-    *args: xarray arguments to be mapped to arguments for func
-      (see xarray.apply_ufunc).
-    require_jax: Whether to require that inputs are based on jax arrays or allow
-      those based on plain numpy arrays too.
-    **apply_ufunc_kwargs: See xarray.apply_ufunc.
-
-  Returns:
-    Corresponding xarray results (see xarray.apply_ufunc).
-  """
-  def wrapped_func(*maybe_wrapped_args):
-    unwrapped_args = [unwrap(a, require_jax) for a in maybe_wrapped_args]
-    result = func(*unwrapped_args)
-    return result
-  return xarray.apply_ufunc(wrapped_func, *args, **apply_ufunc_kwargs)
+apply_ufunc = xarray.apply_ufunc
 
 
 def pmap(fn: Callable[..., Any],
@@ -781,7 +740,7 @@ def _unflatten_variable(
   if isinstance(data, (jax.Array, np.ndarray)):
     return xarray.Variable(dims=dims, data=data)
   else:
-    wrapper = ScalarLeafWrapper(leaf=data, dims=dims, shape=shape)
+    wrapper = NonArrayLeafWrapper(leaf=data, dims=dims, shape=shape)
     return xarray.Variable(dims=dims, data=wrapper)
 
 
@@ -794,7 +753,7 @@ def _split_static_and_jax_coords(
     if coord.attrs.get(_JAX_COORD_ATTR_NAME, False):
       jax_coord_vars[name] = coord.variable
     else:
-      assert not isinstance(coord, (jax.Array, ScalarLeafWrapper))
+      assert not isinstance(coord, (jax.Array, NonArrayLeafWrapper))
       static_coord_vars[name] = coord.variable
   return static_coord_vars, jax_coord_vars
 
