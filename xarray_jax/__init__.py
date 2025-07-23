@@ -740,6 +740,8 @@ def _unflatten_variable(
   if isinstance(data, (jax.Array, np.ndarray)):
     return xarray.Variable(dims=dims, data=data)
   else:
+    # Use the shape of the new leaf if it exists
+    shape = getattr(data, 'shape', shape)
     wrapper = NonArrayLeafWrapper(leaf=data, dims=dims, shape=shape)
     return xarray.Variable(dims=dims, data=wrapper)
 
