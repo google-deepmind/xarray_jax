@@ -359,31 +359,33 @@ class NonArrayLeafWrapper:
   
   """
   
-  def __init__(self, leaf: Any, dims: Tuple[Hashable, ...], shape: Tuple[int, ...]):
+  def __init__(self, leaf: Any, dims: Tuple[Hashable, ...]):
     self._leaf = leaf
     self._dims = dims
-    self._shape = shape
+    
+    # Use a zero-sized shape for non-array data to indicate that this is a placeholder
+    self._shape = getattr(leaf, 'shape', (0,) * len(dims))
     
     # Determine dtype.
     if hasattr(leaf, 'dtype'):
       self._dtype = leaf.dtype
     elif isinstance(leaf, bool):
       self._dtype = jnp.bool_.dtype
-    elif isinstance(leaf, (int, np.integer)):
+    elif isinstance(leaf, int):
       self._dtype = jnp.int32.dtype
-    elif isinstance(leaf, (float, np.floating)):
+    elif isinstance(leaf, float):
       self._dtype = jnp.float32.dtype
     else:
       self._dtype = np.dtype(object)
   
   def __array_ufunc__(self, ufunc, method, *args, **kwargs):
     raise TypeError(
-        f"NumPy ufunc '{ufunc.__name__}' is not supported on symbolic JAX "
+        f"NumPy ufunc '{ufunc.__name__}' is not supported on non-array JAX "
         f"leaf of type {type(self._leaf).__name__}."
     )
   def __array_function__(self, func, types, args, kwargs):
     raise TypeError(
-        f"NumPy function '{func.__name__}' is not supported on symbolic JAX "
+        f"NumPy function '{func.__name__}' is not supported on non-array JAX "
         f"leaf of type {type(self._leaf).__name__}."
     )
   
@@ -406,7 +408,7 @@ class NonArrayLeafWrapper:
 
   def __getitem__(self, key):
     raise TypeError(
-        f"Indexing is not supported on symbolic JAX leaf of type "
+        f"Indexing is not supported on non-array leaf of type "
         f"{type(self._leaf).__name__}."
     )
 
@@ -416,6 +418,7 @@ class NonArrayLeafWrapper:
     """Provides access to the original, unwrapped leaf."""
     return self._leaf
 
+# Alias for backward-compatibility
 apply_ufunc = xarray.apply_ufunc
 
 
@@ -719,19 +722,18 @@ def dims_change_on_unflatten(dims_change_fn: DimsChangeFn):
 
 
 def _flatten_variable(v: xarray.Variable) -> Tuple[
-    Tuple[jax.typing.ArrayLike], Tuple[Tuple[Hashable, ...], Tuple[int, ...]]]:  # pylint: disable=g-one-element-tuple
+    Tuple[jax.typing.ArrayLike], Tuple[Hashable, ...]]:  # pylint: disable=g-one-element-tuple
   """Flattens a Variable for jax.tree_util."""
   children = (unwrap_data(v),)
-  aux = (v.dims, v.shape)
+  aux = v.dims
   return children, aux
 
 
 def _unflatten_variable(
-    aux: Tuple[Tuple[Hashable, ...], Tuple[int, ...]],
-    children: Tuple[jax.typing.ArrayLike],
-) -> xarray.Variable:
+    aux: Tuple[Hashable, ...],
+    children: Tuple[jax.typing.ArrayLike]) -> xarray.Variable:  # pylint: disable=g-one-element-tuple
   """Unflattens a Variable for jax.tree_util."""
-  dims, shape = aux
+  dims = aux
   data = children[0]
 
   dims_change_fn = _DIMS_CHANGE_ON_UNFLATTEN_FN.get(None)
@@ -740,9 +742,7 @@ def _unflatten_variable(
   if isinstance(data, (jax.Array, np.ndarray)):
     return xarray.Variable(dims=dims, data=data)
   else:
-    # Use the shape of the new leaf if it exists
-    shape = getattr(data, 'shape', shape)
-    wrapper = NonArrayLeafWrapper(leaf=data, dims=dims, shape=shape)
+    wrapper = NonArrayLeafWrapper(leaf=data, dims=dims)
     return xarray.Variable(dims=dims, data=wrapper)
 
 
