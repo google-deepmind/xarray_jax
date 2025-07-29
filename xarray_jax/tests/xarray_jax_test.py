@@ -19,6 +19,7 @@ import jax.numpy as jnp
 import numpy as np
 import xarray
 import xarray_jax
+import xarray.ufuncs as xu
 
 
 class XarrayJaxTest(absltest.TestCase):
@@ -28,7 +29,7 @@ class XarrayJaxTest(absltest.TestCase):
       x = xarray.Variable(('lat', 'lon'), inputs)
       # We'll apply a sequence of operations just to test that the end result is
       # still a JAX array, i.e. we haven't converted to numpy at any point.
-      x = abs((x + 2) * (x - 3))
+      x = xu.abs((x + 2) * (x - 3))
       x = x.isel({'lat': slice(0, -1), 'lon': slice(1, 3)})
       x = xarray.Variable.concat([x, x + 1], dim='lat')
       x = x.transpose('lon', 'lat')
@@ -52,7 +53,7 @@ class XarrayJaxTest(absltest.TestCase):
                                data=inputs,
                                coords={'lat': np.arange(3) * 10,
                                        'lon': np.arange(4) * 10})
-      x = abs((x + 2) * (x - 3))
+      x = xu.abs((x + 2) * (x - 3))
       x = x.sel({'lat': slice(0, 20)})
       y = xarray_jax.DataArray(dims=('lat', 'lon'),
                                data=ones,
@@ -81,7 +82,7 @@ class XarrayJaxTest(absltest.TestCase):
               'time': np.arange(2),
               'lat': np.arange(3) * 10,
               'lon': np.arange(4) * 10})
-      x = abs((x + 2) * (x - 3))
+      x = xu.abs((x + 2) * (x - 3))
       x = x.sel({'lat': slice(0, 20)})
       y = xarray_jax.Dataset(
           data_vars={'foo': (('lat', 'lon'), foo),

@@ -205,6 +205,9 @@ def Dataset(  # pylint:disable=invalid-name
 
   return assign_coords(result, coords=coords, jax_coords=jax_coords)
 
+# Alias for backward-compatibility
+Variable = xarray.Variable
+
 
 DatasetOrDataArray = TypeVar(
     'DatasetOrDataArray', xarray.Dataset, xarray.DataArray)
@@ -302,6 +305,11 @@ def assign_jax_coords(
   return assign_coords(x, jax_coords=jax_coords or jax_coords_kwargs)
 
 
+# Identity function for backward-compatibility
+def wrap(value):
+  return value
+
+
 def unwrap(value, require_jax=False):
   """Unwraps NonArrayLeafWrapper instances, passing through other values."""
   unwrapped = value.leaf if isinstance(value, NonArrayLeafWrapper) else value
@@ -351,12 +359,14 @@ def jax_vars(
   return cast(Mapping[str, jax.Array], unwrap_vars(dataset, require_jax=True))
 
 class NonArrayLeafWrapper:
-  """Wraps non-array data into a duck-typed array suitable for use with xarray.
+  """Wraps non-array leaf value into a duck-typed array for use with xarray.
 
+  This is necessary to satisfy the JAX contract and handle cases where JAX 
+  transformations produce non-array leaf values (e.g., Python scalars, ShapeDtypeStruct) 
+  that must be re-inserted into an xarray structure.
 
   Provides a minimal array-like interface required by xarray's constructors and 
-  raises errors for unsupported operations on non-array data types.
-  
+  raises TypeError for unsupported operations on non-array data types.
   """
   
   def __init__(self, leaf: Any, dims: Tuple[Hashable, ...]):
@@ -378,6 +388,7 @@ class NonArrayLeafWrapper:
     else:
       self._dtype = np.dtype(object)
   
+  # TODO: Migrate to the Python Array API standard
   def __array_ufunc__(self, ufunc, method, *args, **kwargs):
     raise TypeError(
         f"NumPy ufunc '{ufunc.__name__}' is not supported on non-array JAX "
@@ -722,7 +733,7 @@ def dims_change_on_unflatten(dims_change_fn: DimsChangeFn):
 
 
 def _flatten_variable(v: xarray.Variable) -> Tuple[
-    Tuple[jax.typing.ArrayLike], Tuple[Hashable, ...]]:  # pylint: disable=g-one-element-tuple
+    Tuple[Any], Tuple[Hashable, ...]]:  # pylint: disable=g-one-element-tuple
   """Flattens a Variable for jax.tree_util."""
   children = (unwrap_data(v),)
   aux = v.dims
@@ -731,7 +742,7 @@ def _flatten_variable(v: xarray.Variable) -> Tuple[
 
 def _unflatten_variable(
     aux: Tuple[Hashable, ...],
-    children: Tuple[jax.typing.ArrayLike]) -> xarray.Variable:  # pylint: disable=g-one-element-tuple
+    children: Tuple[Any]) -> xarray.Variable:  # pylint: disable=g-one-element-tuple
   """Unflattens a Variable for jax.tree_util."""
   dims = aux
   data = children[0]
