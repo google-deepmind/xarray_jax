@@ -13,21 +13,16 @@
 # limitations under the License.
 """Helpers to use xarray.{Variable,DataArray,Dataset} with JAX.
 
-Allows them to be based on JAX arrays without converting to numpy arrays under
-the hood, so you can start with a JAX array, do some computation with it in
-xarray-land, get a JAX array out the other end and (for example) jax.jit
-through the whole thing. You can even jax.jit a function which accepts and
-returns xarray.Dataset, DataArray and Variable.
+Allows them to be used within JAX transformations, so you can start with a JAX
+array, do some computation with it in xarray-land, get a JAX array out the other 
+end, and (for example) `jax.jit` through the whole thing. You can even `jax.jit` 
+a function which accepts and returns xarray.Dataset, DataArray and Variable.
 
-## Creating xarray datatypes from jax arrays, and vice-versa.
+## Custom Constructors and Unwrapping
 
-You can use the xarray_jax.{Variable,DataArray,Dataset} constructors, which have
-the same API as the standard xarray constructors but will accept JAX arrays
-without converting them to numpy.
-
-It does this by wrapping the JAX array in a wrapper before passing it to
-xarray; you can also do this manually by calling xarray_jax.wrap on your JAX
-arrays before passing them to the standard xarray constructors.
+While xarray's standard constructors now support JAX arrays directly, this
+library also provides custom xarray_jax.{DataArray, Dataset} constructors to
+support `jax_coords` (see "Treatment of coordinates" below).
 
 To get non-wrapped JAX arrays out the other end, you can use e.g.:
 
@@ -43,17 +38,7 @@ JAX arrays, you can use:
   xarray_jax.unwrap_vars(dataset)
   xarray_jax.unwrap_data(dataset.some_var)
 
-which will unwrap the data if it is a wrapped JAX array, but otherwise pass
-it through to you without complaint.
-
-The wrapped JAX arrays aim to support all the core operations from the numpy
-array API that xarray expects, however there may still be some gaps; if you run
-into any problems around this, you may need to add a few more proxy methods onto
-the wrapper class below.
-
-In future once JAX and xarray support the new  Python array API standard
-(https://data-apis.org/array-api/latest/index.html), we hope to avoid the need
-for wrapping the JAX arrays like this.
+which will return the underlying data.
 
 ## jax.jit and pmap of functions taking and returning xarray datatypes
 
@@ -153,9 +138,7 @@ def DataArray(  # pylint:disable=invalid-name
       handled consistently so is something we encourage explicit control over.
 
   Returns:
-    An instance of xarray.DataArray. Where JAX arrays are used as data or
-    coords, they will be wrapped with JaxArrayWrapper and can be unwrapped via
-    `unwrap` and `unwrap_data`.
+    An instance of xarray.DataArray.
   """
   result = xarray.DataArray(data, dims=dims, name=name, attrs=attrs or {})
   return assign_coords(result, coords=coords, jax_coords=jax_coords)
@@ -198,8 +181,7 @@ def Dataset(  # pylint:disable=invalid-name
       handled consistently so is something we encourage explicit control over.
 
   Returns:
-    An instance of xarray.Dataset. Where JAX arrays are used as data, they
-    will be wrapped with JaxArrayWrapper.
+    An instance of xarray.Dataset.
   """
   result = xarray.Dataset(data_vars=data_vars, attrs=attrs)
 
@@ -305,8 +287,8 @@ def assign_jax_coords(
   return assign_coords(x, jax_coords=jax_coords or jax_coords_kwargs)
 
 
-# Identity function for backward-compatibility
 def wrap(value):
+  """Deprecated identity function for backward compatibility."""
   return value
 
 
