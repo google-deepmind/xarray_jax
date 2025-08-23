@@ -16,7 +16,7 @@
 import collections
 import contextlib
 import contextvars
-from typing import Any, Callable, Iterator, Mapping, Optional, Union, Tuple, TypeVar, cast
+from typing import Any, Callable, Iterator, Mapping, Optional, Union, Tuple, cast
 from typing import Hashable  # pylint: disable=deprecated-class
 
 import jax
@@ -24,7 +24,7 @@ import jax.numpy as jnp
 import numpy as np
 import xarray
 
-from .core import _JAX_COORD_ATTR_NAME, DataArray, assign_coords
+from xarray_jax.core import _JAX_COORD_ATTR_NAME, DataArray, assign_coords
 
 
 def wrap(value):
@@ -83,21 +83,22 @@ def jax_vars(
 class NonArrayLeafWrapper:
   """Wraps non-array leaf value into a duck-typed array for use with xarray.
 
-  This is necessary to satisfy the JAX contract and handle cases where JAX 
-  transformations produce non-array leaf values (e.g., Python scalars, ShapeDtypeStruct) 
-  that must be re-inserted into an xarray structure.
+  This is necessary to satisfy the JAX contract and handle cases where JAX
+  transformations produce non-array leaf values (e.g., Python scalars,
+  ShapeDtypeStruct) that must be re-inserted into an xarray structure.
 
-  Provides a minimal array-like interface required by xarray's constructors and 
+  Provides a minimal array-like interface required by xarray's constructors and
   raises TypeError for unsupported operations on non-array data types.
   """
-  
+
   def __init__(self, leaf: Any, dims: Tuple[Hashable, ...]):
     self._leaf = leaf
     self._dims = dims
-    
-    # Use a zero-sized shape for non-array data to indicate that this is a placeholder
+
+    # Use a zero-sized shape for non-array data to indicate that this is a
+    # placeholder
     self._shape = getattr(leaf, 'shape', (0,) * len(dims))
-    
+
     # Determine dtype.
     if hasattr(leaf, 'dtype'):
       self._dtype = leaf.dtype
@@ -109,7 +110,7 @@ class NonArrayLeafWrapper:
       self._dtype = jnp.float32.dtype
     else:
       self._dtype = np.dtype(object)
-  
+
   # TODO: Migrate to the Python Array API standard
   def __array_ufunc__(self, ufunc, method, *args, **kwargs):
     raise TypeError(
@@ -121,7 +122,7 @@ class NonArrayLeafWrapper:
         f"NumPy function '{func.__name__}' is not supported on non-array JAX "
         f"leaf of type {type(self._leaf).__name__}."
     )
-  
+
 
   @property
   def shape(self):

@@ -33,6 +33,7 @@ def DataArray(  # pylint:disable=invalid-name
     jax_coords=None,
 ) -> xarray.DataArray:
   """Like xarray.DataArray, but supports using JAX arrays.
+
   Args:
     data: As for xarray.DataArray, except jax arrays are also supported.
     coords: Coordinates for the array, see xarray.DataArray. These coordinates
@@ -62,6 +63,7 @@ def DataArray(  # pylint:disable=invalid-name
       affects the way jax.tree_util treats them, which is somewhat orthogonal to
       whether the value is passed in as numpy or not, and generally needs to be
       handled consistently so is something we encourage explicit control over.
+
   Returns:
     An instance of xarray.DataArray.
   """
@@ -76,6 +78,7 @@ def Dataset(  # pylint:disable=invalid-name
     jax_coords=None,
 ) -> xarray.Dataset:
   """Like xarray.Dataset, but can wrap JAX arrays.
+
   Args:
     data_vars: As for xarray.Dataset, except jax arrays are also supported.
     coords: Coordinates for the dataset, see xarray.Dataset. These coordinates
@@ -103,6 +106,7 @@ def Dataset(  # pylint:disable=invalid-name
       affects the way jax.tree_util treats them, which is somewhat orthogonal to
       whether the value is passed in as numpy or not, and generally needs to be
       handled consistently so is something we encourage explicit control over.
+
   Returns:
     An instance of xarray.Dataset.
   """
@@ -126,20 +130,24 @@ def assign_coords(
     jax_coords: Optional[Mapping[Hashable, Any]] = None,
 ) -> DatasetOrDataArray:
   """Replacement for assign_coords which works in presence of jax_coords.
+
   `jax_coords` allow certain specified coordinates to have their data passed as
   JAX arrays (including through jax.jit boundaries). The compromise in return is
   that they are not created as index coordinates and cannot be used for .sel
   and other coordinate-based indexing operations. See docs for `jax_coords` on
   xarray_jax.Dataset and xarray_jax.DataArray for more information.
+
   This function can be used to set jax_coords on an existing DataArray or
   Dataset, and also to set a mix of jax and non-jax coordinates. It uses
   xarray.Coordinates with empty indexes to prevent xarray trying and failing
   to create IndexVariables from jax arrays under the hood.
+
   Args:
     x: An xarray Dataset or DataArray.
     coords: Dict of (non-JAX) coords, or None if not assigning any.
     jax_coords: Dict of JAX coords, or None if not assigning any. See docs for
       xarray_jax.Dataset / DataArray for more information on jax_coords.
+
   Returns:
     The Dataset or DataArray with coordinates assigned, similarly to
     Dataset.assign_coords / DataArray.assign_coords.

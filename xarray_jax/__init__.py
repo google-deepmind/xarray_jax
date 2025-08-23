@@ -81,7 +81,7 @@ data_var instead of a coord. You won't be able to do indexing and slicing using
 the coordinate, but that wasn't going to work with a jax array anyway.
 """
 
-from .core import (
+from xarray_jax.core import (
     apply_ufunc,
     DataArray,
     Dataset,
@@ -90,13 +90,13 @@ from .core import (
     get_jax_coords,
     Variable,
 )
-from .jax_transforms import (
+from xarray_jax.jax_transforms import (
     pmap,
     scan,
     tree_map_variables,
     tree_map_with_dims,
 )
-from .pytree import (
+from xarray_jax.pytree import (
     dims_change_on_unflatten,
     jax_data,
     jax_vars,
@@ -106,14 +106,6 @@ from .pytree import (
     unwrap_data,
     unwrap_vars,
     wrap,
-    _flatten_variable, 
-    _unflatten_variable,
-    _flatten_data_array, 
-    _unflatten_data_array,
-    _flatten_dataset, 
-    _unflatten_dataset,
-    _flatten_datatree, 
-    _unflatten_datatree
 )
 
 __all__ = (
@@ -140,12 +132,4 @@ __all__ = (
     'unwrap_data',
     'unwrap_vars',
     'wrap',
-    '_flatten_variable', 
-    '_unflatten_variable',
-    '_flatten_data_array', 
-    '_unflatten_data_array',
-    '_flatten_dataset', 
-    '_unflatten_dataset',
-    '_flatten_datatree', 
-    '_unflatten_datatree'
 )

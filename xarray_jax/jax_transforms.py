@@ -18,10 +18,8 @@ from typing import Any, Callable, Optional, TypeVar
 import jax
 import xarray
 
-from .pytree import dims_change_on_unflatten, unwrap
+from xarray_jax.pytree import dims_change_on_unflatten, unwrap
 
-
-_PyTree = TypeVar('_PyTree')
 
 
 def pmap(fn: Callable[..., Any],
@@ -30,6 +28,7 @@ def pmap(fn: Callable[..., Any],
          devices: ... = None,
          backend: ... = None) -> Callable[..., Any]:
   """Wraps a subset of jax.pmap functionality to handle xarray input/output.
+
   Constraints:
     * Any Dataset or DataArray passed to the function must have `dim` as the
       first dimension. This will be checked. You can ensure this if necessary
@@ -37,6 +36,7 @@ def pmap(fn: Callable[..., Any],
     * All args and return values will be mapped over the first dimension,
       it will use in_axes=0, out_axes=0.
     * No support for static_broadcasted_argnums, donate_argnums etc.
+
   Args:
     fn: Function to be pmap'd which takes and returns trees which may contain
       xarray Dataset/DataArray. Any Dataset/DataArrays passed as input must use
@@ -48,6 +48,7 @@ def pmap(fn: Callable[..., Any],
     devices:
     backend:
       See jax.pmap.
+
   Returns:
     A pmap'd version of `fn`, which takes and returns Dataset/DataArray with an
     extra leading dimension `dim` relative to what the original `fn` sees.
@@ -93,23 +94,29 @@ def pmap(fn: Callable[..., Any],
 
   return result_fn
 
+_PyTree = TypeVar('_PyTree')
+
 
 def tree_map_variables(
     func: Callable[[xarray.Variable], xarray.Variable],
     tree_data: _PyTree) -> _PyTree:
   """Like jax.tree.map but operates with Variables as leaves.
+
   This will work with any jax.tree_util-registered PyTree containing xarray
   datatypes. All jax data in xarray datatypes is exposed via xarray.Variable
   nodes by our registered flatten/unflatten functions and hence here too. Note
   static coordinate data will not be mapped over however.
+
   This allows you to see the associated dimensions for each leaf, and to change
   them. If you change them, it's your responsibility to ensure that when
   unflattened back into DataArray/Dataset/DataTree the result still makes sense.
   In particular that any updated shapes are consistent with the shapes of any
   static (non-jax_coord) coordinates, since these will not be mapped over.
+
   Args:
     func: Function from xarray.Variable to xarray.Variable.
     tree_data: PyTree to be mapped over.
+
   Returns:
     PyTree with the same structure as `tree_data` but where xarray.Variables
     within xarray datatypes have been mapped over by `func`. Any leaves outside
@@ -127,14 +134,18 @@ def tree_map_with_dims(
     data: _PyTree,
 ) -> _PyTree:
   """Like jax.tree.map but also passes in xarray dimensions where known.
+
   This is convenient when applying logic to every jax array in some xarray data
   structure, which wants to be sensitive to the xarray dimension names.
   Typical examples of this would be jax operations relating to sharding where
   you may want to map xarray dimension names to sharding axis names.
+
   This only supports changing array shapes in limited situations (see below).
+
   Unlike tree_map_variables above, this will also map over plain jax arrays
   that don't occur within xarray.Variable nodes; these will be passed to func
   with dims=None.
+
   Args:
     func: A function from (jax_array, dims) -> jax_array. dims will correspond
       to the dimension names of the xarray.Variable containing the jax_array
@@ -151,6 +162,7 @@ def tree_map_with_dims(
     data: Any pytree with jax ArrayLike leaves suitable for use with
       `jax.tree.map`. Thanks to xarray_jax such pytrees may include xarray
       datatypes.
+
   Returns:
     A pytree of the same structure as data, with the result of applying func
     to each jax array found.
@@ -187,17 +199,21 @@ def scan(f: Callable[[_Carry, _X], tuple[_Carry, _Y]],
          unroll: int | bool = 1,
          ) -> tuple[_Carry, _Y]:
   """Like jax.lax.scan but supports xarray data.
+
   This can handle a jax.tree containing any mix of xarray and plain jax data.
   It scans along the dimension `dim` for xarray data, and the leading axis for
   any non-xarray data. These scanned-along dimensions must all be consistent in
   size.
+
   Static coordinates along `dim` in the `xs` will not be present on the `x`
   argument to `f`, since they would be different on each iteration and we can't
   pass them through as static data. jax_coords will be passed through correctly
   however.
+
   Static coordinates along `dim` on the `xs` will also not be present on the
   resulting `ys`, you will need to copy these across yourself if desired.
   (This one we may be able to fix in future.)
+
   Args:
     f: Function to apply at each step of the scan. This should map
       (carry, x) -> (carry, y), where `x` is a slice of the `xs` along the `dim`
@@ -213,6 +229,7 @@ def scan(f: Callable[[_Carry, _X], tuple[_Carry, _Y]],
     length: The length of the scan, if `xs` are not provided.
     reverse: Whether to scan in reverse order.
     unroll: How many steps to unroll the scan, see jax.lax.scan.
+
   Returns:
     final_carry: The carry returned from the final step of the scan.
     ys: Data corresponding to the `y` returned from `f` on each step of the
