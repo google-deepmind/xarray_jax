@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from absl.testing import absltest
+from absl.testing import absltest, parameterized
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -139,6 +139,166 @@ class PytreeTest(absltest.TestCase):
         jax.device_get(dataset.isel(batch=0, drop=True)),
         jax.device_get(with_removed_dim))
 
+
+class NonArrayLeafWrapperTest(parameterized.TestCase):
+
+  @parameterized.named_parameters(
+      (type(leaf).__name__, leaf) for leaf in [True,
+          None,
+          42,
+          3.14,
+          object(),
+          jax.stages.ArgInfo(
+              jax.ShapeDtypeStruct(shape=(2, 3), dtype=jnp.float32),
+              lambda: 'donated'
+          ),
+          jax.ShapeDtypeStruct(shape=(2, 3), dtype=jnp.float32),
+      ]
+  )
+  def test_preserves_leaf_identity(self, leaf):
+    var = xarray.Variable(('x', 'y'), jnp.ones((2, 3)))
+    unflattened_var = xarray_jax.pytree._unflatten_variable(var.dims, (leaf,))
+
+    # Preserves leaf identity
+    self.assertIsInstance(
+        unflattened_var.data, xarray_jax.NonArrayLeafWrapper
+    )
+    self.assertIs(unflattened_var.data.leaf, leaf)
+
+  @parameterized.named_parameters(
+      ('int', 42, (0, 0), np.int32),
+      ('bool', True, (0, 0), np.bool_),
+      ('float', 3.14, (0, 0), np.float32),
+      ('ShapeDtypeStruct', jax.ShapeDtypeStruct(
+          shape=(2, 3), dtype=jnp.float32), (2, 3), np.float32),
+      ('None', None, (0, 0), np.dtype(object)),
+      ('object', object(), (0, 0), np.dtype(object)),
+  )
+  def test_creates_valid_xarray_objects(
+      self, leaf, expected_shape, expected_dtype
+  ):
+    var = xarray.Variable(('x', 'y'), jnp.ones((2, 3)))
+    unflattened_var = xarray_jax.pytree._unflatten_variable(
+        var.dims, (leaf,)
+    )
+
+    # Returns a valid xarray object
+    self.assertEqual(unflattened_var.shape, expected_shape)
+    self.assertEqual(unflattened_var.dims, var.dims)
+    self.assertEqual(unflattened_var.dtype, expected_dtype)
+
+    # Allows basic operations
+    self.assertEqual(unflattened_var.data.ndim, var.ndim)
+    self.assertEqual(unflattened_var.data.size, np.prod(expected_shape))
+
+  def test_creates_valid_xarray_objects_scalar(self):
+    # Ensure shape=() when dims=() and leaf has no shape
+    var, leaf = xarray.Variable((), jnp.array(1.0)), 7
+    unflattened_var = xarray_jax.pytree._unflatten_variable(var.dims, (leaf,))
+    self.assertEqual(unflattened_var.shape, ())
+    self.assertEqual(unflattened_var.dims, var.dims)
+    self.assertEqual(unflattened_var.dtype, jnp.int32)
+    self.assertEqual(unflattened_var.data.ndim, 0)
+    self.assertEqual(unflattened_var.data.size, np.prod(()))
+
+  def test_unsupported_operations_raise_error(self):
+    var, leaf = xarray.Variable(('x',), jnp.ones((2,))), 42
+    unflattened_var = xarray_jax.pytree._unflatten_variable(
+        var.dims, (leaf,)
+    )
+    wrapped_data = unflattened_var.data
+
+    with self.assertRaisesRegex(TypeError, 'NumPy ufunc'):
+      np.add(wrapped_data, 1)
+    with self.assertRaisesRegex(TypeError, 'NumPy function'):
+      np.sum(wrapped_data)
+    with self.assertRaisesRegex(TypeError, 'Indexing is not supported'):
+      _ = wrapped_data[0]
+
+
+  def test_roundtrip_with_non_array_leaves(self):
+    original_dataset = xarray_jax.Dataset(
+        data_vars={
+            'foo': (('x', 'y'), jnp.ones((2, 3))),
+            'bar': (('y', 'z'), jnp.zeros((3, 4))),
+        },
+        coords={'x': np.arange(2)},
+        jax_coords={'y': jnp.arange(3) * 10},
+    )
+
+    # Map to ShapeDtypeStruct.
+    struct_dataset = jax.tree_util.tree_map(
+        lambda x: jax.ShapeDtypeStruct(x.shape, x.dtype),
+        original_dataset)
+
+    self.assertIsInstance(
+        struct_dataset['foo'].data, xarray_jax.NonArrayLeafWrapper)
+    self.assertIsInstance(
+        struct_dataset['bar'].data, xarray_jax.NonArrayLeafWrapper)
+    self.assertIsInstance(
+        struct_dataset['y'].data, xarray_jax.NonArrayLeafWrapper)
+
+    self.assertIsInstance(
+        struct_dataset['foo'].data.leaf, jax.ShapeDtypeStruct)
+    self.assertIsInstance(
+        struct_dataset['bar'].data.leaf, jax.ShapeDtypeStruct)
+    self.assertIsInstance(
+        struct_dataset['y'].data.leaf, jax.ShapeDtypeStruct)
+
+    # Map back to arrays.
+    reconstructed_dataset = jax.tree_util.tree_map(
+        lambda x: jnp.ones(x.shape, x.dtype),
+        struct_dataset)
+
+    self.assertIsInstance(reconstructed_dataset['foo'].data, jax.Array)
+    self.assertIsInstance(reconstructed_dataset['bar'].data, jax.Array)
+    self.assertIsInstance(reconstructed_dataset['y'].data, jax.Array)
+
+    expected_dataset = xarray_jax.Dataset(
+        data_vars={
+            'foo': (('x', 'y'), jnp.ones((2, 3))),
+            'bar': (('y', 'z'), jnp.ones((3, 4))),
+        },
+        coords={'x': np.arange(2)},
+        jax_coords={'y': jnp.ones(original_dataset.y.shape,
+                                  dtype=original_dataset.y.dtype)},
+    )
+    xarray.testing.assert_identical(
+        jax.device_get(reconstructed_dataset),
+        jax.device_get(expected_dataset),
+    )
+
+  def test_two_arg_tree_map_roundtrip_with_non_array_leaves(self):
+    original_dataset = xarray_jax.Dataset(
+        data_vars={
+            'foo': (('x', 'y'), jnp.ones((2, 3), dtype=jnp.float32)),
+            'bar': (('y', 'z'), jnp.zeros((3, 4), dtype=jnp.float32)),
+        },
+        jax_coords={'y': jnp.arange(3) * 10},
+    )
+
+    # Map to arbitrary non-array leaves (booleans).
+    bool_dataset = jax.tree_util.tree_map(lambda _: True, original_dataset)
+
+    # Use tree_map to reconstruct arrays using the original shapes/dtypes.
+    reconstructed = jax.tree_util.tree_map(
+        lambda orig, _tag: jnp.ones(orig.shape, orig.dtype),
+        original_dataset,
+        bool_dataset,
+    )
+
+    expected_dataset = xarray_jax.Dataset(
+        data_vars={
+            'foo': (('x', 'y'), jnp.ones((2, 3), dtype=jnp.float32)),
+            'bar': (('y', 'z'), jnp.ones((3, 4), dtype=jnp.float32)),
+        },
+        jax_coords={'y': jnp.ones(original_dataset.y.shape,
+                                  dtype=original_dataset.y.dtype)},
+    )
+    xarray.testing.assert_identical(
+        jax.device_get(reconstructed),
+        jax.device_get(expected_dataset),
+    )
 
 if __name__ == '__main__':
   absltest.main()
