@@ -93,6 +93,7 @@ from xarray_jax.core import (
     Variable,
 )
 from xarray_jax.jax_transforms import (
+    vmap,
     pmap,
     scan,
     tree_map_variables,
@@ -120,6 +121,7 @@ __all__ = (
     'get_jax_coords',
     'Variable',
     # jax_transforms
+    'vmap',
     'pmap',
     'scan',
     'tree_map_variables',
