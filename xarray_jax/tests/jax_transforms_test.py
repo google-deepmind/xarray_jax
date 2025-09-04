@@ -22,6 +22,161 @@ import xarray_jax
 
 class JaxTransformsTest(absltest.TestCase):
 
+  def test_vmap(self):
+    batch_size = 5
+    foo = jnp.zeros((batch_size, 3, 4), dtype=np.float32)
+    bar = jnp.zeros((batch_size, 2, 3, 4), dtype=np.float32)
+    dataset = xarray_jax.Dataset({
+        'foo': (('batch', 'lat', 'lon'), foo),
+        'bar': (('batch', 'time', 'lat', 'lon'), bar)})
+
+    def func(d):
+      self.assertNotIn('batch', d.dims)
+      return d + 1
+    func = xarray_jax.vmap(func, dim='batch')
+
+    result = func(dataset)
+    xarray.testing.assert_identical(
+        jax.device_get(dataset + 1),
+        jax.device_get(result))
+
+    # Can call it again with a different argument structure (it will recompile
+    # under the hood but should work):
+    dataset = dataset.drop_vars('foo')
+    result = func(dataset)
+    xarray.testing.assert_identical(
+        jax.device_get(dataset + 1),
+        jax.device_get(result))
+
+  def test_vmap_with_jax_coords(self):
+    batch_size = 5
+    foo = jnp.zeros((batch_size, 3, 4), dtype=np.float32)
+    bar = jnp.zeros((batch_size, 2, 3, 4), dtype=np.float32)
+    time = jnp.zeros((batch_size, 2), dtype=np.float32)
+    dataset = xarray_jax.Dataset(
+        {'foo': (('batch', 'lat', 'lon'), foo),
+         'bar': (('batch', 'time', 'lat', 'lon'), bar)},
+        coords={
+            'lat': np.arange(3),
+            'lon': np.arange(4),
+        },
+        jax_coords={
+            'time': xarray.Variable(('batch', 'time'), time),
+        }
+    )
+
+    def func(d):
+      self.assertNotIn('batch', d.dims)
+      self.assertNotIn('batch', d.coords['time'].dims)
+
+      # The jax_coord 'time' should be passed in backed by a JAX array, but
+      # not as an index coordinate.
+      self.assertIsInstance(d.coords['time'].data, jax.Array)
+      self.assertNotIn('time', d.indexes)
+
+      return d + 1
+    func = xarray_jax.vmap(func, dim='batch')
+
+    result = func(dataset)
+    xarray.testing.assert_identical(
+        jax.device_get(dataset + 1),
+        jax.device_get(result))
+
+    # Can call it again with a different argument structure (it will recompile
+    # under the hood but should work):
+    dataset = dataset.drop_vars('foo')
+    result = func(dataset)
+    xarray.testing.assert_identical(
+        jax.device_get(dataset + 1),
+        jax.device_get(result))
+
+  def test_vmap_with_tree_mix_of_xarray_and_jax_array(self):
+    batch_size = 5
+    data_array = xarray_jax.DataArray(
+        data=jnp.ones((batch_size, 3, 4), dtype=np.float32),
+        dims=('batch', 'lat', 'lon'))
+    plain_array = jnp.ones((batch_size, 2), dtype=np.float32)
+    inputs = {'foo': data_array,
+              'bar': plain_array}
+
+    def func(x):
+      return x['foo'] + 1, x['bar'] + 1
+
+    func = xarray_jax.vmap(func, dim='batch')
+    result_foo, result_bar = func(inputs)
+    xarray.testing.assert_identical(
+        jax.device_get(inputs['foo'] + 1),
+        jax.device_get(result_foo))
+    np.testing.assert_array_equal(
+        jax.device_get(inputs['bar'] + 1),
+        jax.device_get(result_bar))
+
+  def test_vmap_complains_when_dim_not_first(self):
+    batch_size = 5
+    data_array = xarray_jax.DataArray(
+        data=jnp.ones((3, batch_size, 4), dtype=np.float32),
+        dims=('lat', 'batch', 'lon'))
+
+    func = xarray_jax.vmap(lambda x: x+1, dim='batch')
+    with self.assertRaisesRegex(
+        ValueError, 'Expected dim batch at index 0, found at 1'):
+      func(data_array)
+
+  def test_vmap_axis_name_psum_broadcast(self):
+    batch_size = 4
+    x_size = 3
+    data_array = xarray_jax.DataArray(
+        data=jnp.ones((batch_size, x_size), dtype=jnp.float32),
+        dims=('batch', 'x'))
+
+    def func(d):
+      # Inside vmap the 'batch' dim is removed. Use a collective over the
+      # mapped axis.
+      total = jax.lax.psum(
+          xarray_jax.jax_data(d).sum(), 'batch'
+      )  # scalar per mapped axis
+      return d + 1, total
+
+    func = xarray_jax.vmap(func, dim='batch', axis_name='batch')
+
+    out_da, out_total = func(data_array)
+    # First output matches elementwise add
+    xarray.testing.assert_identical(
+        jax.device_get(data_array + 1), jax.device_get(out_da))
+    # Second output is broadcast across the mapped axis by vmap(out_axes=0)
+    out_total_host = jax.device_get(out_total)
+    self.assertEqual(out_total_host.shape, (batch_size,))
+    expected = float(batch_size * x_size)
+    self.assertTrue(np.allclose(out_total_host, expected))
+
+  def test_vmap_axis_size(self):
+    batch_size = 5
+    data_array = xarray_jax.DataArray(
+        data=jnp.ones((batch_size, 2), dtype=jnp.float32),
+        dims=('batch', 'x'))
+
+    ok = xarray_jax.vmap(lambda d: d + 1, dim='batch', axis_size=batch_size)
+    _ = ok(data_array)
+
+    bad = xarray_jax.vmap(
+        lambda d: d + 1, dim='batch', axis_size=batch_size - 1
+    )
+    with self.assertRaises(Exception):
+      _ = bad(data_array)
+
+  def test_vmap_spmd_axis_name_noop(self):
+    # spmd_axis_name is forwarded to jax.vmap; without SPMD context it
+    # should be a no-op.
+    batch_size = 3
+    data_array = xarray_jax.DataArray(
+        data=jnp.ones((batch_size, 2), dtype=jnp.float32),
+        dims=('batch', 'x'))
+    func = xarray_jax.vmap(lambda d: d + 1, dim='batch', spmd_axis_name='batch')
+    out = func(data_array)
+    xarray.testing.assert_identical(
+        jax.device_get(data_array + 1), jax.device_get(out)
+    )
+
   def test_pmap(self):
     devices = jax.local_device_count()
     foo = jnp.zeros((devices, 3, 4), dtype=np.float32)

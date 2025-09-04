@@ -20,6 +20,77 @@ import xarray
 from xarray_jax import pytree
 
 
+def vmap(fn: Callable[..., Any],
+         dim: str,
+         axis_name: Optional[str] = None,
+         axis_size: int | None = None,
+         spmd_axis_name: Any | None = None) -> Callable[..., Any]:
+  """Wraps a subset of jax.vmap functionality to handle xarray input/output.
+
+  Constraints:
+    * Any Dataset or DataArray passed to the function must have `dim` as the
+      first dimension. This will be checked. You can ensure this if necessary
+      by calling `.transpose(dim, ...)` beforehand.
+    * All args and return values will be mapped over the first dimension,
+      it will use in_axes=0, out_axes=0. No broadcasting is supported.
+
+  Args:
+    fn: Function to be vmap'd which takes and returns trees which may contain
+      xarray Dataset/DataArray. Any Dataset/DataArrays passed as input must use
+      `dim` as the first dimension on all arrays.
+    dim: The xarray dimension name corresponding to the first dimension that is
+      vmapped over (vmap is called with in_axes=0, out_axes=0).
+    axis_name:
+    axis_size:
+    spmd_axis_name:
+      See jax.vmap.
+
+  Returns:
+    A vmap'd version of `fn`, which takes and returns Dataset/DataArray with an
+    extra leading dimension `dim` relative to what the original `fn` sees.
+  """
+  input_treedef = None
+  output_treedef = None
+
+  def fn_passed_to_vmap(*flat_args):
+    assert input_treedef is not None
+    # Inside the vmap the original first dimension will no longer be present:
+    def check_and_remove_leading_dim(dims):
+      try:
+        index = dims.index(dim)
+      except ValueError:
+        index = None
+      if index != 0:
+        raise ValueError(f'Expected dim {dim} at index 0, found at {index}.')
+      return dims[1:]
+    with pytree.dims_change_on_unflatten(check_and_remove_leading_dim):
+      args = jax.tree_util.tree_unflatten(input_treedef, flat_args)
+    result = fn(*args)
+    nonlocal output_treedef
+    flat_result, output_treedef = jax.tree_util.tree_flatten(result)
+    return flat_result
+
+  vmapped_fn = jax.vmap(
+      fn_passed_to_vmap,
+      in_axes=0,
+      out_axes=0,
+      axis_name=axis_name or dim,
+      axis_size=axis_size,
+      spmd_axis_name=spmd_axis_name)
+
+  def result_fn(*args):
+    nonlocal input_treedef
+    flat_args, input_treedef = jax.tree_util.tree_flatten(args)
+    flat_result = vmapped_fn(*flat_args)
+    assert output_treedef is not None
+    # After the vmap an extra leading axis will be present, we need to add an
+    # xarray dimension for this when unflattening the result:
+    with pytree.dims_change_on_unflatten(lambda dims: (dim,) + dims):
+      return jax.tree_util.tree_unflatten(output_treedef, flat_result)
+
+  return result_fn
+
+
 def pmap(fn: Callable[..., Any],
          dim: str,
          axis_name: Optional[str] = None,
