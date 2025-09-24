@@ -277,9 +277,21 @@ class JaxTransformsTest(absltest.TestCase):
         dims=('lat', 'device', 'lon'))
 
     func = xarray_jax.pmap(lambda x: x+1, dim='device')
-    with self.assertRaisesRegex(
-        ValueError, 'Expected dim device at index 0, found at 1'):
+    if jax.config.jax_pmap_shmap_merge:
+      regex = (
+          'cannot select an axis to squeeze out which has size not equal to'
+          ' one.*'
+      )
+    else:
+      regex = 'Expected dim device at index 0, found at 1'
+    with self.assertRaisesRegex(ValueError, regex):
       func(data_array)
+
+  def test_pmap_complains_when_dim_not_first_pmap_shmap_merge(self):
+    pmap_shmap_merge = jax.config.jax_pmap_shmap_merge
+    jax.config.update('jax_pmap_shmap_merge', True)
+    self.test_pmap_complains_when_dim_not_first()
+    jax.config.update('jax_pmap_shmap_merge', pmap_shmap_merge)
 
   def test_apply_ufunc(self):
     inputs = xarray_jax.DataArray(
