@@ -154,6 +154,23 @@ def pmap(fn: Callable[..., Any],
   def result_fn(*args):
     nonlocal input_treedef
     flat_args, input_treedef = jax.tree_util.tree_flatten(args)
+    # --- Pre-flight diagnostic v3 (Corrected Protocol) ---
+    for arg in args:
+        if isinstance(arg, (xarray.DataArray, xarray.Dataset)):
+            # Convert the "frozen" dims object to a simple list before searching.
+            # This is the new, correct protocol.
+            dims_list = list(arg.dims)
+            try:
+                index = dims_list.index(dim)
+            except ValueError:
+                raise ValueError(
+                    f"Expected dim '{dim}' for pmap, but it was not found in "
+                    f"the input's dims: {arg.dims}")
+
+            # The safety check now happens OUTSIDE the try/except block.
+            if index != 0:
+                raise ValueError(f"Expected dim {dim} at index 0, found at {index}")
+    # --- Pre-flight diagnostic v3 ends here ---
     flat_result = pmapped_fn(*flat_args)
     assert output_treedef is not None
     # After the pmap an extra leading axis will be present, we need to add an
