@@ -81,6 +81,8 @@ data_var instead of a coord. You won't be able to do indexing and slicing using
 the coordinate, but that wasn't going to work with a jax array anyway.
 """
 
+__version__ = "0.0.1"
+
 # pylint: disable=g-importing-member,g-multiple-import
 
 from xarray_jax.core import (
