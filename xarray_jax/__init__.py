@@ -113,7 +113,7 @@ from xarray_jax.pytree import (
     wrap,
 )
 
-__version__ = '0.1.0'
+__version__ = '0.2.0.dev'
 
 __all__ = (
     # core
