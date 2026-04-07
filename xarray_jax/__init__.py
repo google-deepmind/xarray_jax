@@ -83,6 +83,8 @@ the coordinate, but that wasn't going to work with a jax array anyway.
 
 # pylint: disable=g-importing-member,g-multiple-import
 
+import xarray
+
 from xarray_jax.core import (
     apply_ufunc,
     DataArray,
@@ -137,3 +139,33 @@ __all__ = (
     'unwrap_vars',
     'wrap',
 )
+
+# Xarray's default arithmetic_compat='minimal' attempts coordinate compatibility
+# checks for arithmetic operations, which will fail with a
+# jax.errors.TracerBoolConversionError when tracers are used as coordinates.
+#
+# xarray currently swallows this error and treats it as a coordinate mismatch,
+# resulting in JAX coordinates being dropped when performing arithmetic
+# operations inside a jit. This is undesirable both in its own right, and
+# because the behaviour is inconsistent between jit vs non-jit code. In future
+# we hope to fix xarray so the TracerBoolConversionError is allowed to bubble up
+# (see https://github.com/pydata/xarray/issues/10924#issuecomment-4156625436),
+# but regardless we need a convenient way to avoid these coordinate compat
+# checks when working with JAX coordinates.
+#
+# The fix for now is to set arithmetic_compat='override' globally when importing
+# xarray_jax, which disables any compatibility checks on non-index coordinates
+# during arithmetic. (This only affects arithmetic; other xarray APIs may need
+# compat='override' arguments specifying explicitly.)
+#
+# Admittedly setting this globally is not ideal, but the alternative (requiring
+# users to remember to set it locally around any xarray arithmetic that might
+# touch jax coordinates, and potentially encounter some very subtle bugs if
+# they forget) was felt to be worse.
+#
+# See https://github.com/pydata/xarray/issues/10924 for more context/discussion.
+#
+# If you don't use jax-valued coordinates at all, or would rather apply this
+# setting manually only where it's needed, you're free to revert it globally
+# back to the xarray default after importing xarray_jax.
+xarray.set_options(arithmetic_compat='override')

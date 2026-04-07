@@ -346,6 +346,45 @@ class XarrayJaxTest(absltest.TestCase):
     xarray.testing.assert_equal(
         result.g.variable, xarray.Variable(('g2',), np.arange(2)))
 
+  def test_arithmetic_preserves_jax_coords(self):
+    # When xarray performs binary arithmetic between two DataArrays
+    # (e.g. da1 + da2), it checks whether coordinates on the two operands
+    # match. With JAX-traced coordinates (inside jit), this comparison can
+    # fail, causing xarray to silently drop the coordinates. The
+    # arithmetic_compat='override' setting (applied globally by xarray_jax)
+    # bypasses this check.
+    da1 = xarray_jax.DataArray(
+        data=jnp.ones((3, 4), dtype=np.float32),
+        dims=('lat', 'lon'),
+        coords={'lat': np.arange(3)},
+        jax_coords={'lon': jnp.arange(4) * 10})
+    da2 = xarray_jax.DataArray(
+        data=jnp.ones((3, 4), dtype=np.float32) * 2,
+        dims=('lat', 'lon'),
+        coords={'lat': np.arange(3)},
+        jax_coords={'lon': jnp.arange(4) * 10})
+
+    with self.subTest('eager'):
+      result = da1 + da2
+      self.assertIn('lon', result.coords,
+                    'jax_coord dropped during eager arithmetic')
+
+    with self.subTest('jit'):
+      # Two separate DataArray arguments get independently traced
+      # coordinates from pytree unflatten, so xarray must actually
+      # compare them.
+      @jax.jit
+      def fn(a, b):
+        result = a + b
+        self.assertIn('lon', result.coords,
+                      'jax_coord dropped during jit arithmetic')
+        return result
+
+      _ = fn(da1, da2)
+      result = fn(da1, da2)
+      self.assertIn('lon', result.coords,
+                    'jax_coord dropped in jit output')
+
 
 if __name__ == '__main__':
   absltest.main()
