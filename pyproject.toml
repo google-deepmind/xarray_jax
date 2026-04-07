@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gdm-xarray-jax"
+dynamic = ["version"]
+description = "Library to support using xarray datatypes with JAX."
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.13"
+authors = [
+  { name = "Google DeepMind" },
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "jax>=0.4.30",
+    "numpy>=1.24",
+    "xarray>=2026.01.0",
+]
+
+[project.optional-dependencies]
+test = [
+    "absl-py",
+    "chex",
+]
+
+[project.urls]
+Homepage = "https://github.com/google-deepmind/xarray_jax"
+Repository = "https://github.com/google-deepmind/xarray_jax"
+
+[tool.setuptools.dynamic]
+version = {attr = "xarray_jax.__version__"}
+
+[tool.setuptools]
+packages = ["xarray_jax", "xarray_jax.tests"]
