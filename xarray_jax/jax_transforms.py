@@ -91,11 +91,13 @@ def vmap(fn: Callable[..., Any],
   return result_fn
 
 
-def pmap(fn: Callable[..., Any],
-         dim: str,
-         axis_name: Optional[str] = None,
-         devices: ... = None,
-         backend: ... = None) -> Callable[..., Any]:
+def pmap(
+    fn: Callable[..., Any],
+    dim: str,
+    axis_name: Optional[str] = None,
+    devices=None,
+    backend=None,
+) -> Callable[..., Any]:
   """Wraps a subset of jax.pmap functionality to handle xarray input/output.
 
   Constraints:
@@ -162,6 +164,7 @@ def pmap(fn: Callable[..., Any],
       return jax.tree_util.tree_unflatten(output_treedef, flat_result)
 
   return result_fn
+
 
 _PyTree = TypeVar('_PyTree')
 
